@@ -1,3 +1,3 @@
 module github.com/yadmabramov/admAlerting
 
-go 1.24.0
+go 1.22.12
