@@ -20,6 +20,9 @@ func TestMain(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	_, err := http.Get("http://localhost:8080/update/gauge/test/1")
+	resp, err := http.Get("http://localhost:8080/update/gauge/test/1")
+	if resp != nil {
+		defer resp.Body.Close() // Закрываем тело ответа
+	}
 	assert.NoError(t, err)
 }
