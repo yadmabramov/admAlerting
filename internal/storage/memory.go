@@ -3,7 +3,7 @@ package storage
 import "sync"
 
 type MemoryStorage struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	gauges   map[string]float64
 	counters map[string]int64
 }
@@ -43,4 +43,18 @@ func (s *MemoryStorage) GetAllMetrics() (map[string]float64, map[string]int64) {
 	}
 
 	return gaugesCopy, countersCopy
+}
+
+func (s *MemoryStorage) GetGauge(name string) (float64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	val, ok := s.gauges[name]
+	return val, ok
+}
+
+func (s *MemoryStorage) GetCounter(name string) (int64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	val, ok := s.counters[name]
+	return val, ok
 }
