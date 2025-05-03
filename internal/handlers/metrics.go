@@ -18,6 +18,11 @@ func NewMetricsHandler(storage storage.Repository) *MetricsHandler {
 }
 
 func (h *MetricsHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	mType := chi.URLParam(r, "type")
 	mName := chi.URLParam(r, "name")
 	mValue := chi.URLParam(r, "value")
