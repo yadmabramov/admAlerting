@@ -5,32 +5,19 @@ import (
 	"log"
 	"net/url"
 	"os"
-	"strings"
 
 	"github.com/spf13/pflag"
 	"github.com/yadmabramov/admAlerting/internal/server"
 )
 
 func validateAndNormalizeServerURL(rawURL string) (string, error) {
-	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
-		rawURL = "http://" + rawURL
-	}
-
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid server URL: %v", err)
 	}
 
 	if u.Port() == "" {
-		if u.Scheme == "https" {
-			u.Host = u.Hostname() + ":443"
-		} else {
-			u.Host = u.Hostname() + ":8080"
-		}
-	}
-
-	if u.Hostname() == "" {
-		return "", fmt.Errorf("server host cannot be empty")
+		u.Host = u.Hostname() + ":8080"
 	}
 
 	return u.String(), nil
