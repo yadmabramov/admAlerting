@@ -69,6 +69,7 @@ func main() {
 		pflag.Usage()
 		os.Exit(1)
 	}
+	config.ServerURL = "http://" + config.ServerURL
 
 	agent := agent.NewAgent(config)
 	log.Printf("Starting agent with config:\n"+
