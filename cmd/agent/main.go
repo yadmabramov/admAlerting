@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -19,25 +21,75 @@ func parseSeconds(s string) (time.Duration, error) {
 	return time.Duration(sec) * time.Second, nil
 }
 
-func main() {
+func getEnv(key, defaultValue string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return defaultValue
+}
 
-	config := agent.Config{
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	if value, exists := os.LookupEnv(key); exists {
+		if sec, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return time.Duration(sec) * time.Second
+		}
+	}
+	return defaultValue
+}
+
+func validateAndNormalizeServerURL(rawURL string) (string, error) {
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		rawURL = "http://" + rawURL
+	}
+
+	// Парсим URL для проверки структуры
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid server URL: %v", err)
+	}
+
+	if u.Port() == "" {
+		if u.Scheme == "https" {
+			u.Host = u.Hostname() + ":443"
+		} else {
+			u.Host = u.Hostname() + ":8080"
+		}
+	}
+
+	if u.Hostname() == "" {
+		return "", fmt.Errorf("server host cannot be empty")
+	}
+
+	return u.String(), nil
+}
+
+func main() {
+	defaultConfig := agent.Config{
 		ServerURL:      "localhost:8080",
 		PollInterval:   2 * time.Second,
 		ReportInterval: 10 * time.Second,
 	}
 
-	var pollSec, reportSec string
-	pflag.StringVarP(&config.ServerURL, "address", "a", config.ServerURL, "HTTP server endpoint address")
-	pflag.StringVarP(&pollSec, "poll-interval", "p", "2", "Poll interval in seconds (default: 2)")
-	pflag.StringVarP(&reportSec, "report-interval", "r", "10", "Report interval in seconds (default: 10)")
+	config := agent.Config{
+		ServerURL:      getEnv("ADDRESS", defaultConfig.ServerURL),
+		PollInterval:   getEnvDuration("POLL_INTERVAL", defaultConfig.PollInterval),
+		ReportInterval: getEnvDuration("REPORT_INTERVAL", defaultConfig.ReportInterval),
+	}
+
+	var flagAddress, flagPoll, flagReport string
+	pflag.StringVarP(&flagAddress, "address", "a", "", "HTTP server endpoint address")
+	pflag.StringVarP(&flagPoll, "poll-interval", "p", "", "Poll interval in seconds")
+	pflag.StringVarP(&flagReport, "report-interval", "r", "", "Report interval in seconds")
 	pflag.BoolP("help", "h", false, "Show help message")
 
 	pflag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags]\n\nFlags:\n", os.Args[0])
 		pflag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  %s -a http://server:8080 -p 5 -r 30\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "\nEnvironment variables (highest priority):\n")
+		fmt.Fprintf(os.Stderr, "  ADDRESS          HTTP server endpoint address\n")
+		fmt.Fprintf(os.Stderr, "  POLL_INTERVAL    Poll interval in seconds\n")
+		fmt.Fprintf(os.Stderr, "  REPORT_INTERVAL  Report interval in seconds\n")
+		fmt.Fprintf(os.Stderr, "\nPriority: ENV > FLAGS > DEFAULTS\n")
 	}
 
 	if err := pflag.CommandLine.Parse(os.Args[1:]); err != nil {
@@ -51,28 +103,32 @@ func main() {
 		return
 	}
 
-	var err error
-	if config.PollInterval, err = parseSeconds(pollSec); err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid poll interval: %v\n\n", err)
-		pflag.Usage()
-		os.Exit(1)
+	if flagAddress != "" && os.Getenv("ADDRESS") == "" {
+		config.ServerURL = flagAddress
+	}
+	if flagPoll != "" && os.Getenv("POLL_INTERVAL") == "" {
+		if interval, err := parseSeconds(flagPoll); err == nil {
+			config.PollInterval = interval
+		} else {
+			log.Fatalf("Invalid poll interval: %v", err)
+		}
+	}
+	if flagReport != "" && os.Getenv("REPORT_INTERVAL") == "" {
+		if interval, err := parseSeconds(flagReport); err == nil {
+			config.ReportInterval = interval
+		} else {
+			log.Fatalf("Invalid report interval: %v", err)
+		}
 	}
 
-	if config.ReportInterval, err = parseSeconds(reportSec); err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid report interval: %v\n\n", err)
-		pflag.Usage()
-		os.Exit(1)
+	normalizedURL, err := validateAndNormalizeServerURL(config.ServerURL)
+	if err != nil {
+		log.Fatalf("Server URL validation failed: %v", err)
 	}
-
-	if len(pflag.Args()) > 0 {
-		fmt.Fprintf(os.Stderr, "Error: unknown arguments: %v\n\n", pflag.Args())
-		pflag.Usage()
-		os.Exit(1)
-	}
-	config.ServerURL = "http://" + config.ServerURL
+	config.ServerURL = normalizedURL
 
 	agent := agent.NewAgent(config)
-	log.Printf("Starting agent with config:\n"+
+	log.Printf("Starting agent with config (priority: ENV > FLAGS > DEFAULTS):\n"+
 		"  Server URL:      %s\n"+
 		"  Poll Interval:   %v (%.0f seconds)\n"+
 		"  Report Interval: %v (%.0f seconds)",
