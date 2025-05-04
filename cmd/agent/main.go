@@ -22,7 +22,7 @@ func parseSeconds(s string) (time.Duration, error) {
 func main() {
 
 	config := agent.Config{
-		ServerURL:      "http://localhost:8080",
+		ServerURL:      "localhost:8080",
 		PollInterval:   2 * time.Second,
 		ReportInterval: 10 * time.Second,
 	}
