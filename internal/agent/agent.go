@@ -1,6 +1,8 @@
+// admAlerting/internal/agent/agent.go
 package agent
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -19,6 +21,7 @@ type Agent struct {
 	pollCount      int64
 	mu             sync.Mutex
 }
+
 type Config struct {
 	ServerURL      string
 	PollInterval   time.Duration
@@ -36,14 +39,15 @@ func NewAgent(config Config) *Agent {
 }
 
 func (a *Agent) Run() {
-	pollTicker := time.NewTicker(a.pollInterval)
-	reportTicker := time.NewTicker(a.reportInterval)
-
 	for {
-		select {
-		case <-pollTicker.C:
-			a.collectMetrics()
-		case <-reportTicker.C:
+		// Собираем метрики
+		a.collectMetrics()
+
+		// Ждем интервал опроса
+		time.Sleep(a.pollInterval)
+
+		// Проверяем, не пришло ли время отправки
+		if time.Now().UnixNano()%a.reportInterval.Nanoseconds() < a.pollInterval.Nanoseconds() {
 			a.sendMetrics()
 		}
 	}
@@ -105,22 +109,15 @@ func (a *Agent) sendMetrics() {
 
 func (a *Agent) sendMetric(mType, mName, mValue string) error {
 	url := a.serverURL + "/update/" + mType + "/" + mName + "/" + mValue
-	req, err := http.NewRequest(http.MethodPost, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "text/plain")
-
-	resp, err := a.client.Do(req)
+	resp, err := a.client.Post(url, "text/plain", nil)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return err
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
 	}
-
 	return nil
 }
 
