@@ -6,12 +6,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/yadmabramov/admAlerting/internal/handlers"
+	"github.com/yadmabramov/admAlerting/internal/service"
 	"github.com/yadmabramov/admAlerting/internal/storage"
 )
 
 func NewServer(addr string) *http.Server {
 	storage := storage.NewMemoryStorage()
-	handler := handlers.NewMetricsHandler(storage)
+	service := service.NewMetricsService(storage)
+	handler := handlers.NewMetricsHandler(service)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)

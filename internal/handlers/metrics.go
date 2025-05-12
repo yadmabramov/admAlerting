@@ -6,15 +6,15 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/yadmabramov/admAlerting/internal/storage"
+	"github.com/yadmabramov/admAlerting/internal/service"
 )
 
 type MetricsHandler struct {
-	storage storage.Repository
+	service *service.MetricsService
 }
 
-func NewMetricsHandler(storage storage.Repository) *MetricsHandler {
-	return &MetricsHandler{storage: storage}
+func NewMetricsHandler(service *service.MetricsService) *MetricsHandler {
+	return &MetricsHandler{service: service}
 }
 
 func (h *MetricsHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
@@ -27,25 +27,19 @@ func (h *MetricsHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 	mName := chi.URLParam(r, "name")
 	mValue := chi.URLParam(r, "value")
 
+	var err error
 	switch mType {
 	case "gauge":
-		value, err := strconv.ParseFloat(mValue, 64)
-		if err != nil {
-			http.Error(w, "Invalid value", http.StatusBadRequest)
-			return
-		}
-		h.storage.UpdateGauge(mName, value)
-
+		err = h.service.UpdateGauge(mName, mValue)
 	case "counter":
-		value, err := strconv.ParseInt(mValue, 10, 64)
-		if err != nil {
-			http.Error(w, "Invalid value", http.StatusBadRequest)
-			return
-		}
-		h.storage.UpdateCounter(mName, value)
-
+		err = h.service.UpdateCounter(mName, mValue)
 	default:
 		http.Error(w, "Invalid type", http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -58,12 +52,12 @@ func (h *MetricsHandler) HandleGetMetric(w http.ResponseWriter, r *http.Request)
 
 	switch mType {
 	case "gauge":
-		if value, ok := h.storage.(*storage.MemoryStorage).GetGauge(mName); ok {
+		if value, ok := h.service.GetGauge(mName); ok {
 			w.Write([]byte(strconv.FormatFloat(value, 'f', -1, 64)))
 			return
 		}
 	case "counter":
-		if value, ok := h.storage.(*storage.MemoryStorage).GetCounter(mName); ok {
+		if value, ok := h.service.GetCounter(mName); ok {
 			w.Write([]byte(strconv.FormatInt(value, 10)))
 			return
 		}
@@ -76,7 +70,7 @@ func (h *MetricsHandler) HandleGetMetric(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *MetricsHandler) HandleGetAllMetricsJSON(w http.ResponseWriter, r *http.Request) {
-	gauges, counters := h.storage.GetAllMetrics()
+	gauges, counters := h.service.GetAllMetrics()
 
 	type MetricsResponse struct {
 		Gauges   map[string]float64 `json:"gauges"`

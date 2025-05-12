@@ -26,7 +26,7 @@ const htmlTemplate = `<!DOCTYPE html>
 </html>`
 
 func (h *MetricsHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
-	gauges, counters := h.storage.GetAllMetrics()
+	gauges, counters := h.service.GetAllMetrics()
 
 	var rows strings.Builder
 

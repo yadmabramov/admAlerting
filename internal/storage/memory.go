@@ -15,21 +15,23 @@ func NewMemoryStorage() *MemoryStorage {
 	}
 }
 
-func (s *MemoryStorage) UpdateGauge(name string, value float64) {
+func (s *MemoryStorage) UpdateGauge(name string, value float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gauges[name] = value
+	return nil
 }
 
-func (s *MemoryStorage) UpdateCounter(name string, value int64) {
+func (s *MemoryStorage) UpdateCounter(name string, value int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.counters[name] += value
+	return nil
 }
 
 func (s *MemoryStorage) GetAllMetrics() (map[string]float64, map[string]int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	gaugesCopy := make(map[string]float64)
 	countersCopy := make(map[string]int64)
