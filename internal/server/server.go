@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/yadmabramov/admAlerting/internal/handlers"
-	"github.com/yadmabramov/admAlerting/internal/server/log_middleware"
+	"github.com/yadmabramov/admAlerting/internal/server/logmiddleware"
 	"github.com/yadmabramov/admAlerting/internal/service"
 	"github.com/yadmabramov/admAlerting/internal/storage"
 	"go.uber.org/zap"
@@ -24,7 +24,7 @@ func NewServer(addr string) *http.Server {
 
 	r := chi.NewRouter()
 
-	r.Use(log_middleware.LoggerMiddleware(logger)) // используем напрямую
+	r.Use(logmiddleware.LoggerMiddleware(logger))
 
 	r.Get("/", handler.HandleIndex)
 	r.Post("/update/{type}/{name}/{value}", handler.HandleUpdate)

@@ -1,4 +1,4 @@
-package log_middleware
+package logmiddleware
 
 import (
 	"net/http"
