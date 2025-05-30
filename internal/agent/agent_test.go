@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,8 +17,14 @@ func TestAgent(t *testing.T) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
+		assert.Equal(t, "gzip", r.Header.Get("Content-Encoding"))
+
+		gz, err := gzip.NewReader(r.Body)
+		assert.NoError(t, err)
+		defer gz.Close()
+
 		var metric models.Metrics
-		err := json.NewDecoder(r.Body).Decode(&metric)
+		err = json.NewDecoder(gz).Decode(&metric)
 		assert.NoError(t, err)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -52,7 +59,7 @@ func TestAgent(t *testing.T) {
 		assert.Equal(t, int64(1), a.pollCount)
 	})
 
-	t.Run("Metric sending via JSON", func(t *testing.T) {
+	t.Run("Metric sending via JSON with gzip", func(t *testing.T) {
 		a := NewAgent(config)
 		a.collectMetrics()
 
@@ -69,7 +76,7 @@ func TestAgent(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("Run agent with intervals using JSON API", func(t *testing.T) {
+	t.Run("Run agent with intervals using JSON API and gzip", func(t *testing.T) {
 		a := NewAgent(config)
 		done := make(chan struct{})
 
@@ -113,13 +120,17 @@ func TestFormatFloat(t *testing.T) {
 }
 
 func TestSendMetricJSON(t *testing.T) {
-
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/update/", r.URL.Path)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		assert.Equal(t, "gzip", r.Header.Get("Content-Encoding"))
+
+		gz, err := gzip.NewReader(r.Body)
+		assert.NoError(t, err)
+		defer gz.Close()
 
 		var metric models.Metrics
-		err := json.NewDecoder(r.Body).Decode(&metric)
+		err = json.NewDecoder(gz).Decode(&metric)
 		assert.NoError(t, err)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -135,12 +146,12 @@ func TestSendMetricJSON(t *testing.T) {
 
 	a := NewAgent(config)
 
-	t.Run("Send gauge metric", func(t *testing.T) {
+	t.Run("Send gauge metric with gzip", func(t *testing.T) {
 		err := a.sendMetricJSON("gauge", "TestGauge", "123.45")
 		assert.NoError(t, err)
 	})
 
-	t.Run("Send counter metric", func(t *testing.T) {
+	t.Run("Send counter metric with gzip", func(t *testing.T) {
 		err := a.sendMetricJSON("counter", "TestCounter", "10")
 		assert.NoError(t, err)
 	})
