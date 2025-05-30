@@ -5,10 +5,37 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/yadmabramov/admAlerting/internal/server"
 )
+
+func getEnv(key, defaultValue string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return defaultValue
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	if value, exists := os.LookupEnv(key); exists {
+		if b, err := strconv.ParseBool(value); err == nil {
+			return b
+		}
+	}
+	return defaultValue
+}
+
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	if value, exists := os.LookupEnv(key); exists {
+		if sec, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return time.Duration(sec) * time.Second
+		}
+	}
+	return defaultValue
+}
 
 func validateAndNormalizeServerURL(rawURL string) (string, error) {
 	u, err := url.Parse(rawURL)
@@ -23,18 +50,27 @@ func validateAndNormalizeServerURL(rawURL string) (string, error) {
 	return u.String(), nil
 }
 
-func getEnv(key, defaultValue string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	return defaultValue
-}
-
 func main() {
-	addr := getEnv("ADDRESS", "localhost:8080")
+	defaultConfig := server.Config{
+		Addr:          "localhost:8080",
+		StoreInterval: 5 * time.Second,
+		StoragePath:   "metrics-db.json",
+		Restore:       true,
+	}
 
-	var flagAddr string
+	config := server.Config{
+		Addr:          getEnv("ADDRESS", defaultConfig.Addr),
+		StoreInterval: getEnvDuration("STORE_INTERVAL", defaultConfig.StoreInterval),
+		StoragePath:   getEnv("FILE_STORAGE_PATH", defaultConfig.StoragePath),
+		Restore:       getEnvBool("RESTORE", defaultConfig.Restore),
+	}
+
+	var flagAddr, flagStoreInt, flagStoragePath string
+	var flagRestore bool
 	pflag.StringVarP(&flagAddr, "address", "a", "", "HTTP server endpoint address (env: ADDRESS)")
+	pflag.StringVarP(&flagStoreInt, "store-interval", "i", "", "Interval to save metrics to disk in seconds (env: STORE_INTERVAL)")
+	pflag.StringVarP(&flagStoragePath, "file-storage-path", "f", "", "Path to file for saving metrics (env: FILE_STORAGE_PATH)")
+	pflag.BoolVarP(&flagRestore, "restore", "r", true, "Restore metrics from file (env: RESTORE)")
 	pflag.BoolP("help", "h", false, "Show help message")
 	pflag.BoolP("version", "v", false, "Show version information")
 	pflag.CommandLine.SortFlags = false
@@ -43,7 +79,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\nOptions:\n", os.Args[0])
 		pflag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nEnvironment variables:\n")
-		fmt.Fprintf(os.Stderr, "  ADDRESS          HTTP server endpoint address (highest priority)\n")
+		fmt.Fprintf(os.Stderr, "  ADDRESS            HTTP server endpoint address (highest priority)\n")
+		fmt.Fprintf(os.Stderr, "  STORE_INTERVAL     Interval to save metrics to disk in seconds\n")
+		fmt.Fprintf(os.Stderr, "  FILE_STORAGE_PATH  Path to file for saving metrics\n")
+		fmt.Fprintf(os.Stderr, "  RESTORE            Restore metrics from file (true/false)\n")
 		fmt.Fprintf(os.Stderr, "\nPriority: ENV > FLAGS > DEFAULTS\n")
 	}
 
@@ -54,17 +93,28 @@ func main() {
 	}
 
 	if flagAddr != "" && os.Getenv("ADDRESS") == "" {
-		addr = flagAddr
+		config.Addr = flagAddr
+	}
+	if flagStoreInt != "" && os.Getenv("STORE_INTERVAL") == "" {
+		if interval, err := strconv.ParseInt(flagStoreInt, 10, 64); err == nil {
+			config.StoreInterval = time.Duration(interval) * time.Second
+		}
+	}
+	if flagStoragePath != "" && os.Getenv("FILE_STORAGE_PATH") == "" {
+		config.StoragePath = flagStoragePath
+	}
+	if pflag.Lookup("restore").Changed && os.Getenv("RESTORE") == "" {
+		config.Restore = flagRestore
 	}
 
-	normalizedURL, err := validateAndNormalizeServerURL(addr)
+	normalizedURL, err := validateAndNormalizeServerURL(config.Addr)
 	if err != nil {
 		log.Fatalf("Server URL validation failed: %v", err)
 	}
-	addr = normalizedURL
+	config.Addr = normalizedURL
 
-	srv := server.NewServer(addr)
-	log.Printf("Server starting on %s", addr)
+	srv := server.NewServer(config)
+	log.Printf("Server starting on %s", config.Addr)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
