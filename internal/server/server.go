@@ -31,7 +31,10 @@ func NewServer(addr string) *http.Server {
 	r.Get("/", handler.HandleIndex)
 	r.Post("/update/{type}/{name}/{value}", handler.HandleUpdate)
 	r.Get("/value/{type}/{name}", handler.HandleGetMetric)
-	r.Get("/metrics", handler.HandleGetAllMetricsJSON)
+	r.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		handler.HandleGetAllMetricsJSON(w, r)
+	})
 
 	r.Post("/update/", handler.HandleUpdateJSON)
 	r.Post("/value/", handler.HandleGetMetricJSON)
