@@ -5,7 +5,14 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 )
+
+var gzipPool = sync.Pool{
+	New: func() interface{} {
+		return gzip.NewWriter(io.Discard)
+	},
+}
 
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -28,10 +35,19 @@ func GzipMiddleware(next http.Handler) http.Handler {
 				strings.Contains(contentType, "text/html") ||
 				strings.Contains(contentType, "text/plain") {
 
-				w.Header().Set("Content-Encoding", "gzip")
-				gz := gzip.NewWriter(w)
+				gz := gzipPool.Get().(*gzip.Writer)
+				defer gzipPool.Put(gz)
 				defer gz.Close()
-				w = &gzipResponseWriter{Writer: gz, ResponseWriter: w}
+
+				gz.Reset(w)
+
+				w.Header().Set("Content-Encoding", "gzip")
+				if contentType != "" {
+					w.Header().Set("Content-Type", contentType)
+				}
+
+				next.ServeHTTP(&gzipResponseWriter{Writer: gz, ResponseWriter: w}, r)
+				return
 			}
 		}
 
@@ -45,5 +61,16 @@ type gzipResponseWriter struct {
 }
 
 func (g *gzipResponseWriter) Write(b []byte) (int, error) {
+	if g.Writer == nil {
+		return g.ResponseWriter.Write(b)
+	}
 	return g.Writer.Write(b)
+}
+
+func (g *gzipResponseWriter) WriteHeader(statusCode int) {
+	// Ensure Content-Encoding is set before writing headers
+	if g.Writer != nil {
+		g.ResponseWriter.Header().Set("Content-Encoding", "gzip")
+	}
+	g.ResponseWriter.WriteHeader(statusCode)
 }
