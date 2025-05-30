@@ -1,17 +1,18 @@
-// admAlerting/internal/agent/agent.go
 package agent
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
-	"net/url"
-	"path"
 	"runtime"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/yadmabramov/admAlerting/internal/models"
 )
 
 type Agent struct {
@@ -126,31 +127,45 @@ func (a *Agent) collectMetrics() {
 	a.pollCount++
 }
 
-func (a *Agent) sendMetrics() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	for name, value := range a.metrics {
-		if err := a.sendMetric("gauge", name, value); err != nil {
-			log.Printf("Failed to send metric %s: %v", name, err)
-		}
-	}
-
-	if err := a.sendMetric("counter", PollCount, strconv.FormatInt(a.pollCount, 10)); err != nil {
-		log.Printf("Failed to send PollCount: %v", err)
-	}
+func formatFloat(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
-func (a *Agent) sendMetric(mType, mName, mValue string) error {
-	base, err := url.Parse(a.serverURL)
-	if err != nil {
-		return fmt.Errorf("invalid server URL: %w", err)
+func (a *Agent) sendMetricJSON(mType, mName, mValue string) error {
+	var metric models.Metrics
+
+	switch mType {
+	case "gauge":
+		val, err := strconv.ParseFloat(mValue, 64)
+		if err != nil {
+			return fmt.Errorf("invalid gauge value: %w", err)
+		}
+		metric = models.Metrics{
+			ID:    mName,
+			MType: mType,
+			Value: &val,
+		}
+	case "counter":
+		val, err := strconv.ParseInt(mValue, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid counter value: %w", err)
+		}
+		metric = models.Metrics{
+			ID:    mName,
+			MType: mType,
+			Delta: &val,
+		}
+	default:
+		return fmt.Errorf("unknown metric type: %s", mType)
 	}
 
-	base.Path = path.Join(base.Path, "update", mType, mName, mValue)
-	fullURL := base.String()
+	jsonData, err := json.Marshal(metric)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metric: %w", err)
+	}
 
-	resp, err := a.client.Post(fullURL, "text/plain", nil)
+	url := a.serverURL + "/update/"
+	resp, err := a.client.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
@@ -159,9 +174,26 @@ func (a *Agent) sendMetric(mType, mName, mValue string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server returned status %d", resp.StatusCode)
 	}
+
+	var response models.Metrics
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+
 	return nil
 }
 
-func formatFloat(value float64) string {
-	return strconv.FormatFloat(value, 'f', -1, 64)
+func (a *Agent) sendMetrics() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	for name, value := range a.metrics {
+		if err := a.sendMetricJSON("gauge", name, value); err != nil {
+			log.Printf("Failed to send metric %s: %v", name, err)
+		}
+	}
+
+	if err := a.sendMetricJSON("counter", PollCount, strconv.FormatInt(a.pollCount, 10)); err != nil {
+		log.Printf("Failed to send PollCount: %v", err)
+	}
 }

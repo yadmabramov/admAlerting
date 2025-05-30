@@ -31,6 +31,9 @@ func NewServer(addr string) *http.Server {
 	r.Get("/value/{type}/{name}", handler.HandleGetMetric)
 	r.Get("/metrics", handler.HandleGetAllMetricsJSON)
 
+	r.Post("/update/", handler.HandleUpdateJSON)
+	r.Post("/value/", handler.HandleGetMetricJSON)
+
 	return &http.Server{
 		Addr:    addr,
 		Handler: r,
