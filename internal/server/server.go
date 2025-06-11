@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -23,6 +24,7 @@ type Config struct {
 	StoreInterval time.Duration
 	StoragePath   string
 	Restore       bool
+	DatabaseDSN   string
 }
 
 type Server struct {
@@ -32,6 +34,7 @@ type Server struct {
 	logger  *zap.Logger
 	stop    chan struct{}
 	wg      sync.WaitGroup
+	db      *sql.DB
 }
 
 func NewServer(config Config) *Server {
@@ -45,6 +48,16 @@ func NewServer(config Config) *Server {
 		if err := loadMetricsFromFile(config.StoragePath, storage); err != nil {
 			logger.Error("Failed to load metrics from file", zap.Error(err))
 		}
+	}
+
+	var db *sql.DB
+	if config.DatabaseDSN != "" {
+		var err error
+		db, err = sql.Open("pgx", config.DatabaseDSN)
+		if err != nil {
+			logger.Fatal("Failed to connect to database", zap.Error(err))
+		}
+		logger.Info("Database connection established")
 	}
 
 	service := service.NewMetricsService(storage)
@@ -63,6 +76,21 @@ func NewServer(config Config) *Server {
 	})
 	r.Post("/update/", handler.HandleUpdateJSON)
 	r.Post("/value/", handler.HandleGetMetricJSON)
+	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+		if db == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		if err := db.PingContext(ctx); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 
 	srv := &http.Server{
 		Addr:    config.Addr,
@@ -75,6 +103,7 @@ func NewServer(config Config) *Server {
 		storage: storage,
 		logger:  logger,
 		stop:    make(chan struct{}),
+		db:      db,
 	}
 
 	if config.StoreInterval > 0 {
@@ -188,6 +217,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.config.StoreInterval > 0 {
 		if err := s.saveMetrics(); err != nil {
 			s.logger.Error("Failed to save metrics on shutdown", zap.Error(err))
+		}
+	}
+
+	if s.db != nil {
+		if err := s.db.Close(); err != nil {
+			s.logger.Error("Failed to close database connection", zap.Error(err))
 		}
 	}
 
