@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"sync"
 )
 
@@ -15,6 +16,10 @@ func NewMemoryStorage() *MemoryStorage {
 		gauges:   make(map[string]float64),
 		counters: make(map[string]int64),
 	}
+}
+
+func (s *MemoryStorage) GetDB() *sql.DB {
+	return nil
 }
 
 func (s *MemoryStorage) UpdateGauge(name string, value float64) error {
@@ -61,4 +66,8 @@ func (s *MemoryStorage) GetCounter(name string) (int64, bool) {
 	defer s.mu.RUnlock()
 	val, ok := s.counters[name]
 	return val, ok
+}
+
+func (s *MemoryStorage) Close() error {
+	return nil
 }

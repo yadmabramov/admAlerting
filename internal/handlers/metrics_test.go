@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +40,14 @@ func (m *MockStorage) GetGauge(name string) (float64, bool) {
 
 func (m *MockStorage) GetCounter(name string) (int64, bool) {
 	return m.lastCounter, true
+}
+
+func (m *MockStorage) GetDB() *sql.DB {
+	return nil
+}
+
+func (m *MockStorage) Close() error {
+	return nil
 }
 
 func TestMetricsHandler(t *testing.T) {
