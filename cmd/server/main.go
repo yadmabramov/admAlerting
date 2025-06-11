@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/spf13/pflag"
 	"github.com/yadmabramov/admAlerting/internal/server"
 )
@@ -56,6 +57,7 @@ func main() {
 		StoreInterval: 5 * time.Second,
 		StoragePath:   "metrics-db.json",
 		Restore:       true,
+		DatabaseDSN:   "",
 	}
 
 	config := server.Config{
@@ -63,13 +65,15 @@ func main() {
 		StoreInterval: getEnvDuration("STORE_INTERVAL", defaultConfig.StoreInterval),
 		StoragePath:   getEnv("FILE_STORAGE_PATH", defaultConfig.StoragePath),
 		Restore:       getEnvBool("RESTORE", defaultConfig.Restore),
+		DatabaseDSN:   getEnv("DATABASE_DSN", defaultConfig.DatabaseDSN),
 	}
 
-	var flagAddr, flagStoreInt, flagStoragePath string
+	var flagAddr, flagStoreInt, flagStoragePath, flagDatabaseDSN string
 	var flagRestore bool
 	pflag.StringVarP(&flagAddr, "address", "a", "", "HTTP server endpoint address (env: ADDRESS)")
 	pflag.StringVarP(&flagStoreInt, "store-interval", "i", "", "Interval to save metrics to disk in seconds (env: STORE_INTERVAL)")
 	pflag.StringVarP(&flagStoragePath, "file-storage-path", "f", "", "Path to file for saving metrics (env: FILE_STORAGE_PATH)")
+	pflag.StringVarP(&flagDatabaseDSN, "database-dsn", "d", "", "Database connection string (env: DATABASE_DSN)") г
 	pflag.BoolVarP(&flagRestore, "restore", "r", true, "Restore metrics from file (env: RESTORE)")
 	pflag.BoolP("help", "h", false, "Show help message")
 	pflag.BoolP("version", "v", false, "Show version information")
@@ -106,7 +110,9 @@ func main() {
 	if pflag.Lookup("restore").Changed && os.Getenv("RESTORE") == "" {
 		config.Restore = flagRestore
 	}
-
+	if flagDatabaseDSN != "" && os.Getenv("DATABASE_DSN") == "" {
+		config.DatabaseDSN = flagDatabaseDSN
+	}
 	normalizedURL, err := validateAndNormalizeServerURL(config.Addr)
 	if err != nil {
 		log.Fatalf("Server URL validation failed: %v", err)
