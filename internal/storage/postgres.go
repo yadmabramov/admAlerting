@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -108,6 +109,7 @@ func (s *PostgresStorage) GetAllMetrics() (map[string]float64, map[string]int64)
 			}
 		}
 		if err := rows.Err(); err != nil {
+			log.Printf("Error reading gauges: %v", err)
 		}
 	}
 
@@ -122,6 +124,7 @@ func (s *PostgresStorage) GetAllMetrics() (map[string]float64, map[string]int64)
 			}
 		}
 		if err := rows.Err(); err != nil {
+			log.Printf("Error reading counters: %v", err)
 		}
 	}
 
