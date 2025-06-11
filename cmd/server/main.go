@@ -73,7 +73,7 @@ func main() {
 	pflag.StringVarP(&flagAddr, "address", "a", "", "HTTP server endpoint address (env: ADDRESS)")
 	pflag.StringVarP(&flagStoreInt, "store-interval", "i", "", "Interval to save metrics to disk in seconds (env: STORE_INTERVAL)")
 	pflag.StringVarP(&flagStoragePath, "file-storage-path", "f", "", "Path to file for saving metrics (env: FILE_STORAGE_PATH)")
-	pflag.StringVarP(&flagDatabaseDSN, "database-dsn", "d", "", "Database connection string (env: DATABASE_DSN)") г
+	pflag.StringVarP(&flagDatabaseDSN, "database-dsn", "d", "", "Database connection string (env: DATABASE_DSN)")
 	pflag.BoolVarP(&flagRestore, "restore", "r", true, "Restore metrics from file (env: RESTORE)")
 	pflag.BoolP("help", "h", false, "Show help message")
 	pflag.BoolP("version", "v", false, "Show version information")
