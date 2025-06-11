@@ -43,24 +43,34 @@ func NewServer(config Config) *Server {
 		panic(err)
 	}
 
-	storage := storage.NewMemoryStorage()
-	if config.Restore {
-		if err := loadMetricsFromFile(config.StoragePath, storage); err != nil {
-			logger.Error("Failed to load metrics from file", zap.Error(err))
-		}
-	}
-
+	var repo storage.Repository
 	var db *sql.DB
+
 	if config.DatabaseDSN != "" {
-		var err error
-		db, err = sql.Open("pgx", config.DatabaseDSN)
+		postgresStorage, err := storage.NewPostgresStorage(config.DatabaseDSN)
 		if err != nil {
-			logger.Fatal("Failed to connect to database", zap.Error(err))
+			logger.Fatal("Failed to initialize PostgreSQL storage", zap.Error(err))
 		}
-		logger.Info("Database connection established")
+		repo = postgresStorage
+		db = postgresStorage.GetDB()
+		logger.Info("Using PostgreSQL storage")
+	} else {
+		if config.StoragePath != "" {
+			memStorage := storage.NewMemoryStorage()
+			repo = memStorage
+			if config.Restore {
+				if err := loadMetricsFromFile(config.StoragePath, repo); err != nil {
+					logger.Error("Failed to load metrics from file", zap.Error(err))
+				}
+			}
+			logger.Info("Using file storage", zap.String("path", config.StoragePath))
+		} else {
+			repo = storage.NewMemoryStorage()
+			logger.Info("Using in-memory storage")
+		}
 	}
 
-	service := service.NewMetricsService(storage)
+	service := service.NewMetricsService(repo)
 	handler := handlers.NewMetricsHandler(service)
 
 	r := chi.NewRouter()
@@ -100,13 +110,13 @@ func NewServer(config Config) *Server {
 	server := &Server{
 		Server:  srv,
 		config:  config,
-		storage: storage,
+		storage: repo,
 		logger:  logger,
 		stop:    make(chan struct{}),
 		db:      db,
 	}
 
-	if config.StoreInterval > 0 {
+	if config.StoragePath != "" && config.DatabaseDSN == "" && config.StoreInterval > 0 {
 		server.wg.Add(1)
 		go server.startSaver()
 	}
