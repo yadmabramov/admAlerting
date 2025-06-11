@@ -107,6 +107,8 @@ func (s *PostgresStorage) GetAllMetrics() (map[string]float64, map[string]int64)
 				gauges[name] = value
 			}
 		}
+		if err := rows.Err(); err != nil {
+		}
 	}
 
 	rows, err = s.DB.QueryContext(ctx, "SELECT name, value FROM counters")
@@ -118,6 +120,8 @@ func (s *PostgresStorage) GetAllMetrics() (map[string]float64, map[string]int64)
 			if err := rows.Scan(&name, &value); err == nil {
 				counters[name] = value
 			}
+		}
+		if err := rows.Err(); err != nil {
 		}
 	}
 
