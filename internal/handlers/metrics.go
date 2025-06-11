@@ -109,13 +109,19 @@ func (h *MetricsHandler) HandleUpdateJSON(w http.ResponseWriter, r *http.Request
 			return
 		}
 		err = h.service.UpdateGauge(metric.ID, strconv.FormatFloat(*metric.Value, 'f', -1, 64))
-		if err == nil {
-			val, _ := h.service.GetGauge(metric.ID)
-			response = models.Metrics{
-				ID:    metric.ID,
-				MType: metric.MType,
-				Value: &val,
-			}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		val, ok := h.service.GetGauge(metric.ID)
+		if !ok {
+			http.Error(w, "Failed to retrieve updated gauge value", http.StatusInternalServerError)
+			return
+		}
+		response = models.Metrics{
+			ID:    metric.ID,
+			MType: metric.MType,
+			Value: &val,
 		}
 	case "counter":
 		if metric.Delta == nil {
@@ -123,21 +129,22 @@ func (h *MetricsHandler) HandleUpdateJSON(w http.ResponseWriter, r *http.Request
 			return
 		}
 		err = h.service.UpdateCounter(metric.ID, strconv.FormatInt(*metric.Delta, 10))
-		if err == nil {
-			val, _ := h.service.GetCounter(metric.ID)
-			response = models.Metrics{
-				ID:    metric.ID,
-				MType: metric.MType,
-				Delta: &val,
-			}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		val, ok := h.service.GetCounter(metric.ID)
+		if !ok {
+			http.Error(w, "Failed to retrieve updated counter value", http.StatusInternalServerError)
+			return
+		}
+		response = models.Metrics{
+			ID:    metric.ID,
+			MType: metric.MType,
+			Delta: &val,
 		}
 	default:
 		http.Error(w, "Invalid type", http.StatusBadRequest)
-		return
-	}
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
