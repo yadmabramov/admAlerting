@@ -85,6 +85,7 @@ func NewServer(config Config) *Server {
 		handler.HandleGetAllMetricsJSON(w, r)
 	})
 	r.Post("/update/", handler.HandleUpdateJSON)
+	r.Post("/updates/", handler.HandleBatchUpdates)
 	r.Post("/value/", handler.HandleGetMetricJSON)
 	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {

@@ -197,3 +197,72 @@ func (h *MetricsHandler) HandleGetMetricJSON(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
+
+func (h *MetricsHandler) HandleBatchUpdates(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var metrics []models.Metrics
+	if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	var response []models.Metrics
+	for _, metric := range metrics {
+		var resp models.Metrics
+		var err error
+
+		switch metric.MType {
+		case "gauge":
+			if metric.Value == nil {
+				http.Error(w, "Value is required for gauge", http.StatusBadRequest)
+				return
+			}
+			err = h.service.UpdateGauge(metric.ID, strconv.FormatFloat(*metric.Value, 'f', -1, 64))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			val, ok := h.service.GetGauge(metric.ID)
+			if !ok {
+				http.Error(w, "Failed to retrieve updated gauge value", http.StatusInternalServerError)
+				return
+			}
+			resp = models.Metrics{
+				ID:    metric.ID,
+				MType: metric.MType,
+				Value: &val,
+			}
+		case "counter":
+			if metric.Delta == nil {
+				http.Error(w, "Delta is required for counter", http.StatusBadRequest)
+				return
+			}
+			err = h.service.UpdateCounter(metric.ID, strconv.FormatInt(*metric.Delta, 10))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			val, ok := h.service.GetCounter(metric.ID)
+			if !ok {
+				http.Error(w, "Failed to retrieve updated counter value", http.StatusInternalServerError)
+				return
+			}
+			resp = models.Metrics{
+				ID:    metric.ID,
+				MType: metric.MType,
+				Delta: &val,
+			}
+		default:
+			http.Error(w, "Invalid type", http.StatusBadRequest)
+			return
+		}
+		response = append(response, resp)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
