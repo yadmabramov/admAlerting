@@ -3,11 +3,18 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/yadmabramov/admAlerting/internal/utils"
+)
+
+const (
+	dbMaxRetries   = 3
+	dbInitialDelay = 1 * time.Second
 )
 
 type PostgresStorage struct {
@@ -64,31 +71,35 @@ func createTables(db *sql.DB) error {
 }
 
 func (s *PostgresStorage) UpdateGauge(name string, value float64) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	return utils.Retry(dbMaxRetries, dbInitialDelay, func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 
-	_, err := s.DB.ExecContext(ctx, `
-		INSERT INTO gauges (name, value) 
-		VALUES ($1, $2)
-		ON CONFLICT (name) 
-		DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-	`, name, value)
+		_, err := s.DB.ExecContext(ctx, `
+			INSERT INTO gauges (name, value) 
+			VALUES ($1, $2)
+			ON CONFLICT (name) 
+			DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+		`, name, value)
 
-	return err
+		return err
+	})
 }
 
 func (s *PostgresStorage) UpdateCounter(name string, value int64) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	return utils.Retry(dbMaxRetries, dbInitialDelay, func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 
-	_, err := s.DB.ExecContext(ctx, `
-		INSERT INTO counters (name, value) 
-		VALUES ($1, $2)
-		ON CONFLICT (name) 
-		DO UPDATE SET value = counters.value + EXCLUDED.value, updated_at = NOW()
-	`, name, value)
+		_, err := s.DB.ExecContext(ctx, `
+			INSERT INTO counters (name, value) 
+			VALUES ($1, $2)
+			ON CONFLICT (name) 
+			DO UPDATE SET value = counters.value + EXCLUDED.value, updated_at = NOW()
+		`, name, value)
 
-	return err
+		return err
+	})
 }
 
 func (s *PostgresStorage) GetAllMetrics() (map[string]float64, map[string]int64) {
@@ -132,27 +143,47 @@ func (s *PostgresStorage) GetAllMetrics() (map[string]float64, map[string]int64)
 }
 
 func (s *PostgresStorage) GetGauge(name string) (float64, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
 	var value float64
-	err := s.DB.QueryRowContext(ctx, "SELECT value FROM gauges WHERE name = $1", name).Scan(&value)
-	if err != nil {
-		return 0, false
-	}
-	return value, true
+	var found bool
+
+	_ = utils.Retry(dbMaxRetries, dbInitialDelay, func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		err := s.DB.QueryRowContext(ctx, "SELECT value FROM gauges WHERE name = $1", name).Scan(&value)
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			return nil
+		}
+		found = true
+		return nil
+	})
+
+	return value, found
 }
 
 func (s *PostgresStorage) GetCounter(name string) (int64, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
 	var value int64
-	err := s.DB.QueryRowContext(ctx, "SELECT value FROM counters WHERE name = $1", name).Scan(&value)
-	if err != nil {
-		return 0, false
-	}
-	return value, true
+	var found bool
+
+	_ = utils.Retry(dbMaxRetries, dbInitialDelay, func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		err := s.DB.QueryRowContext(ctx, "SELECT value FROM counters WHERE name = $1", name).Scan(&value)
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			return nil
+		}
+		found = true
+		return nil
+	})
+
+	return value, found
 }
 
 func (s *PostgresStorage) Close() error {

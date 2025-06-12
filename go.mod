@@ -4,6 +4,7 @@ go 1.23.0
 
 require (
 	github.com/go-chi/chi/v5 v5.2.1
+	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.10.0

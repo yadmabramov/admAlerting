@@ -16,6 +16,7 @@ import (
 	"github.com/yadmabramov/admAlerting/internal/server/logmiddleware"
 	"github.com/yadmabramov/admAlerting/internal/service"
 	"github.com/yadmabramov/admAlerting/internal/storage"
+	"github.com/yadmabramov/admAlerting/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -96,7 +97,11 @@ func NewServer(config Config) *Server {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		if err := db.PingContext(ctx); err != nil {
+		err := utils.Retry(3, time.Second, func() error {
+			return db.PingContext(ctx)
+		})
+
+		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
