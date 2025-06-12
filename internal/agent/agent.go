@@ -14,6 +14,13 @@ import (
 	"time"
 
 	"github.com/yadmabramov/admAlerting/internal/models"
+	"github.com/yadmabramov/admAlerting/internal/utils"
+)
+
+const (
+	maxRetries      = 3
+	initialDelay    = 1 * time.Second
+	maxBackoffDelay = 5 * time.Second
 )
 
 type Agent struct {
@@ -84,7 +91,10 @@ func (a *Agent) Run() {
 
 		// Проверяем, не пришло ли время отправки
 		if time.Now().UnixNano()%a.reportInterval.Nanoseconds() < a.pollInterval.Nanoseconds() {
-			a.sendMetrics()
+			if err := a.sendBatchMetrics(); err != nil {
+				log.Printf("Failed to send batch metrics: %v, falling back to single metric mode", err)
+				a.sendMetrics()
+			}
 		}
 	}
 }
@@ -132,74 +142,153 @@ func formatFloat(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
+func (a *Agent) sendBatchMetrics() error {
+	return utils.Retry(maxRetries, initialDelay, func() error {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+
+		if len(a.metrics) == 0 && a.pollCount == 0 {
+			return nil
+		}
+
+		var metrics []models.Metrics
+
+		// Добавляем gauge метрики
+		for name, value := range a.metrics {
+			val, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return fmt.Errorf("invalid gauge value: %w", err)
+			}
+			metrics = append(metrics, models.Metrics{
+				ID:    name,
+				MType: "gauge",
+				Value: &val,
+			})
+		}
+
+		// Добавляем counter метрику
+		if a.pollCount > 0 {
+			metrics = append(metrics, models.Metrics{
+				ID:    PollCount,
+				MType: "counter",
+				Delta: &a.pollCount,
+			})
+		}
+
+		jsonData, err := json.Marshal(metrics)
+		if err != nil {
+			return fmt.Errorf("failed to marshal metrics: %w", err)
+		}
+
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		if _, err := gz.Write(jsonData); err != nil {
+			return fmt.Errorf("failed to compress data: %w", err)
+		}
+		if err := gz.Close(); err != nil {
+			return fmt.Errorf("failed to close gzip writer: %w", err)
+		}
+
+		url := a.serverURL + "/updates/"
+		req, err := http.NewRequest("POST", url, &buf)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Content-Encoding", "gzip")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept-Encoding", "gzip")
+
+		resp, err := a.client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("server returned status %d", resp.StatusCode)
+		}
+
+		var response []models.Metrics
+		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+			return fmt.Errorf("failed to decode response: %w", err)
+		}
+
+		return nil
+	})
+}
+
 func (a *Agent) sendMetricJSON(mType, mName, mValue string) error {
-	var metric models.Metrics
+	return utils.Retry(maxRetries, initialDelay, func() error {
 
-	switch mType {
-	case "gauge":
-		val, err := strconv.ParseFloat(mValue, 64)
+		var metric models.Metrics
+
+		switch mType {
+		case "gauge":
+			val, err := strconv.ParseFloat(mValue, 64)
+			if err != nil {
+				return fmt.Errorf("invalid gauge value: %w", err)
+			}
+			metric = models.Metrics{
+				ID:    mName,
+				MType: mType,
+				Value: &val,
+			}
+		case "counter":
+			val, err := strconv.ParseInt(mValue, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid counter value: %w", err)
+			}
+			metric = models.Metrics{
+				ID:    mName,
+				MType: mType,
+				Delta: &val,
+			}
+		default:
+			return fmt.Errorf("unknown metric type: %s", mType)
+		}
+
+		jsonData, err := json.Marshal(metric)
 		if err != nil {
-			return fmt.Errorf("invalid gauge value: %w", err)
+			return fmt.Errorf("failed to marshal metric: %w", err)
 		}
-		metric = models.Metrics{
-			ID:    mName,
-			MType: mType,
-			Value: &val,
+
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		if _, err := gz.Write(jsonData); err != nil {
+			return fmt.Errorf("failed to compress data: %w", err)
 		}
-	case "counter":
-		val, err := strconv.ParseInt(mValue, 10, 64)
+		if err := gz.Close(); err != nil {
+			return fmt.Errorf("failed to close gzip writer: %w", err)
+		}
+
+		url := a.serverURL + "/update/"
+		req, err := http.NewRequest("POST", url, &buf)
 		if err != nil {
-			return fmt.Errorf("invalid counter value: %w", err)
+			return fmt.Errorf("failed to create request: %w", err)
 		}
-		metric = models.Metrics{
-			ID:    mName,
-			MType: mType,
-			Delta: &val,
+
+		req.Header.Set("Content-Encoding", "gzip")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept-Encoding", "gzip")
+
+		resp, err := a.client.Do(req)
+		if err != nil {
+			return err
 		}
-	default:
-		return fmt.Errorf("unknown metric type: %s", mType)
-	}
+		defer resp.Body.Close()
 
-	jsonData, err := json.Marshal(metric)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metric: %w", err)
-	}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("server returned status %d", resp.StatusCode)
+		}
 
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write(jsonData); err != nil {
-		return fmt.Errorf("failed to compress data: %w", err)
-	}
-	if err := gz.Close(); err != nil {
-		return fmt.Errorf("failed to close gzip writer: %w", err)
-	}
+		var response models.Metrics
+		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+			return fmt.Errorf("failed to decode response: %w", err)
+		}
 
-	url := a.serverURL + "/update/"
-	req, err := http.NewRequest("POST", url, &buf)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept-Encoding", "gzip")
-
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server returned status %d", resp.StatusCode)
-	}
-
-	var response models.Metrics
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func (a *Agent) sendMetrics() {

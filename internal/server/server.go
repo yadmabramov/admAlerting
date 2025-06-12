@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/yadmabramov/admAlerting/internal/server/logmiddleware"
 	"github.com/yadmabramov/admAlerting/internal/service"
 	"github.com/yadmabramov/admAlerting/internal/storage"
+	"github.com/yadmabramov/admAlerting/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -23,6 +25,7 @@ type Config struct {
 	StoreInterval time.Duration
 	StoragePath   string
 	Restore       bool
+	DatabaseDSN   string
 }
 
 type Server struct {
@@ -32,6 +35,7 @@ type Server struct {
 	logger  *zap.Logger
 	stop    chan struct{}
 	wg      sync.WaitGroup
+	db      *sql.DB
 }
 
 func NewServer(config Config) *Server {
@@ -40,14 +44,34 @@ func NewServer(config Config) *Server {
 		panic(err)
 	}
 
-	storage := storage.NewMemoryStorage()
-	if config.Restore {
-		if err := loadMetricsFromFile(config.StoragePath, storage); err != nil {
-			logger.Error("Failed to load metrics from file", zap.Error(err))
+	var repo storage.Repository
+	var db *sql.DB
+
+	if config.DatabaseDSN != "" {
+		postgresStorage, err := storage.NewPostgresStorage(config.DatabaseDSN)
+		if err != nil {
+			logger.Fatal("Failed to initialize PostgreSQL storage", zap.Error(err))
+		}
+		repo = postgresStorage
+		db = postgresStorage.GetDB()
+		logger.Info("Using PostgreSQL storage")
+	} else {
+		if config.StoragePath != "" {
+			memStorage := storage.NewMemoryStorage()
+			repo = memStorage
+			if config.Restore {
+				if err := loadMetricsFromFile(config.StoragePath, repo); err != nil {
+					logger.Error("Failed to load metrics from file", zap.Error(err))
+				}
+			}
+			logger.Info("Using file storage", zap.String("path", config.StoragePath))
+		} else {
+			repo = storage.NewMemoryStorage()
+			logger.Info("Using in-memory storage")
 		}
 	}
 
-	service := service.NewMetricsService(storage)
+	service := service.NewMetricsService(repo)
 	handler := handlers.NewMetricsHandler(service)
 
 	r := chi.NewRouter()
@@ -62,7 +86,27 @@ func NewServer(config Config) *Server {
 		handler.HandleGetAllMetricsJSON(w, r)
 	})
 	r.Post("/update/", handler.HandleUpdateJSON)
+	r.Post("/updates/", handler.HandleBatchUpdates)
 	r.Post("/value/", handler.HandleGetMetricJSON)
+	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+		if db == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		err := utils.Retry(3, time.Second, func() error {
+			return db.PingContext(ctx)
+		})
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 
 	srv := &http.Server{
 		Addr:    config.Addr,
@@ -72,12 +116,13 @@ func NewServer(config Config) *Server {
 	server := &Server{
 		Server:  srv,
 		config:  config,
-		storage: storage,
+		storage: repo,
 		logger:  logger,
 		stop:    make(chan struct{}),
+		db:      db,
 	}
 
-	if config.StoreInterval > 0 {
+	if config.StoragePath != "" && config.DatabaseDSN == "" && config.StoreInterval > 0 {
 		server.wg.Add(1)
 		go server.startSaver()
 	}
@@ -188,6 +233,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.config.StoreInterval > 0 {
 		if err := s.saveMetrics(); err != nil {
 			s.logger.Error("Failed to save metrics on shutdown", zap.Error(err))
+		}
+	}
+
+	if s.db != nil {
+		if err := s.db.Close(); err != nil {
+			s.logger.Error("Failed to close database connection", zap.Error(err))
 		}
 	}
 
