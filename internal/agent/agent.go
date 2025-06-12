@@ -85,7 +85,7 @@ func (a *Agent) Run() {
 		// Проверяем, не пришло ли время отправки
 		if time.Now().UnixNano()%a.reportInterval.Nanoseconds() < a.pollInterval.Nanoseconds() {
 			if err := a.sendBatchMetrics(); err != nil {
-				log.Printf("Failed to send batch metrics: %v", err)
+				log.Printf("Failed to send batch metrics: %v, falling back to single metric mode", err)
 				a.sendMetrics()
 			}
 		}
@@ -201,8 +201,14 @@ func (a *Agent) sendBatchMetrics() error {
 		return fmt.Errorf("server returned status %d", resp.StatusCode)
 	}
 
+	var response []models.Metrics
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+
 	return nil
 }
+
 func (a *Agent) sendMetricJSON(mType, mName, mValue string) error {
 	var metric models.Metrics
 
