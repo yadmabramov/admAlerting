@@ -17,19 +17,35 @@ func TestAgent(t *testing.T) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
-		assert.Equal(t, "gzip", r.Header.Get("Content-Encoding"))
+		if r.URL.Path == "/update/" {
+			assert.Equal(t, "gzip", r.Header.Get("Content-Encoding"))
 
-		gz, err := gzip.NewReader(r.Body)
-		assert.NoError(t, err)
-		defer gz.Close()
+			gz, err := gzip.NewReader(r.Body)
+			assert.NoError(t, err)
+			defer gz.Close()
 
-		var metric models.Metrics
-		err = json.NewDecoder(gz).Decode(&metric)
-		assert.NoError(t, err)
+			var metric models.Metrics
+			err = json.NewDecoder(gz).Decode(&metric)
+			assert.NoError(t, err)
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(metric)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(metric)
+		} else if r.URL.Path == "/updates/" {
+			assert.Equal(t, "gzip", r.Header.Get("Content-Encoding"))
+
+			gz, err := gzip.NewReader(r.Body)
+			assert.NoError(t, err)
+			defer gz.Close()
+
+			var metrics []models.Metrics
+			err = json.NewDecoder(gz).Decode(&metrics)
+			assert.NoError(t, err)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(metrics)
+		}
 	}))
 	defer ts.Close()
 
@@ -98,7 +114,6 @@ func TestAgent(t *testing.T) {
 		}
 	})
 }
-
 func TestFormatFloat(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -165,4 +180,39 @@ func TestSendMetricJSON(t *testing.T) {
 		err := a.sendMetricJSON("gauge", "Test", "not-a-number")
 		assert.Error(t, err)
 	})
+}
+
+func TestSendBatchMetrics(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/updates/", r.URL.Path)
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		assert.Equal(t, "gzip", r.Header.Get("Content-Encoding"))
+
+		gz, err := gzip.NewReader(r.Body)
+		assert.NoError(t, err)
+		defer gz.Close()
+
+		var metrics []models.Metrics
+		err = json.NewDecoder(gz).Decode(&metrics)
+		assert.NoError(t, err)
+		assert.True(t, len(metrics) > 0)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(metrics)
+	}))
+	defer ts.Close()
+
+	config := Config{
+		ServerURL:      ts.URL,
+		PollInterval:   100 * time.Millisecond,
+		ReportInterval: 200 * time.Millisecond,
+	}
+
+	a := NewAgent(config)
+	a.collectMetrics()
+
+	err := a.sendBatchMetrics()
+	assert.NoError(t, err)
 }
