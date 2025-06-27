@@ -10,10 +10,14 @@ import (
 
 type MetricsService struct {
 	storage storage.Repository
+	key     string
 }
 
-func NewMetricsService(storage storage.Repository) *MetricsService {
-	return &MetricsService{storage: storage}
+func NewMetricsService(storage storage.Repository, key string) *MetricsService {
+	return &MetricsService{
+		storage: storage,
+		key:     key,
+	}
 }
 
 func (s *MetricsService) UpdateGauge(ctx context.Context, name string, value string) error {
@@ -42,4 +46,7 @@ func (s *MetricsService) GetCounter(ctx context.Context, name string) (int64, bo
 
 func (s *MetricsService) GetAllMetrics(ctx context.Context) (map[string]float64, map[string]int64, error) {
 	return s.storage.GetAllMetrics(ctx)
+}
+func (s *MetricsService) GetKey() string {
+	return s.key
 }

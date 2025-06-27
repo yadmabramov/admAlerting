@@ -67,7 +67,7 @@ func TestAgent(t *testing.T) {
 
 	t.Run("Metric collection", func(t *testing.T) {
 		a := NewAgent(config)
-		a.collectMetrics()
+		a.collectRuntimeMetrics()
 
 		assert.NotEmpty(t, a.metrics["Alloc"])
 		assert.NotEmpty(t, a.metrics["HeapAlloc"])
@@ -77,7 +77,7 @@ func TestAgent(t *testing.T) {
 
 	t.Run("Metric sending via JSON with gzip", func(t *testing.T) {
 		a := NewAgent(config)
-		a.collectMetrics()
+		a.collectRuntimeMetrics()
 
 		err := a.sendMetricJSON("gauge", "TestMetric", "123.45")
 		assert.NoError(t, err)
@@ -211,8 +211,65 @@ func TestSendBatchMetrics(t *testing.T) {
 	}
 
 	a := NewAgent(config)
-	a.collectMetrics()
+	a.collectRuntimeMetrics()
 
-	err := a.sendBatchMetrics()
+	err := a.sendBatchMetrics(a.metrics)
 	assert.NoError(t, err)
+}
+
+func TestCollectGopsutilMetrics(t *testing.T) {
+	a := NewAgent(Config{})
+	a.collectGopsutilMetrics()
+
+	assert.NotEmpty(t, a.metrics[TotalMemory])
+	assert.NotEmpty(t, a.metrics[FreeMemory])
+}
+
+func TestWorkerPool(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	config := Config{
+		ServerURL:      ts.URL,
+		PollInterval:   10 * time.Millisecond,
+		ReportInterval: 20 * time.Millisecond,
+		RateLimit:      2,
+	}
+
+	a := NewAgent(config)
+
+	go a.Run()
+
+	for i := 0; i < 5; i++ {
+		a.metricsChan <- map[string]string{"TestMetric": "123.45"}
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	assert.True(t, len(a.workerPool) <= config.RateLimit)
+
+	a.cancel()
+}
+
+func TestContextCancellation(t *testing.T) {
+	config := Config{
+		ServerURL:      "http://localhost",
+		PollInterval:   100 * time.Millisecond,
+		ReportInterval: 200 * time.Millisecond,
+		RateLimit:      1,
+	}
+
+	a := NewAgent(config)
+
+	go a.Run()
+
+	a.cancel()
+
+	time.Sleep(300 * time.Millisecond)
+	select {
+	case <-a.ctx.Done():
+	default:
+		t.Error("Context was not cancelled")
+	}
 }
