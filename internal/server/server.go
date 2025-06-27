@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/yadmabramov/admAlerting/internal/handlers"
 	"github.com/yadmabramov/admAlerting/internal/server/gzipmiddleware"
+	"github.com/yadmabramov/admAlerting/internal/server/hashmiddleware"
 	"github.com/yadmabramov/admAlerting/internal/server/logmiddleware"
 	"github.com/yadmabramov/admAlerting/internal/service"
 	"github.com/yadmabramov/admAlerting/internal/storage"
@@ -27,6 +28,7 @@ type Config struct {
 	StoragePath   string
 	Restore       bool
 	DatabaseDSN   string
+	Key           string
 }
 
 type Server struct {
@@ -69,12 +71,13 @@ func NewServer(config Config) *Server {
 		logger.Info("Using in-memory storage", zap.String("path", config.StoragePath))
 	}
 
-	service := service.NewMetricsService(repo)
+	service := service.NewMetricsService(repo, config.Key)
 	handler := handlers.NewMetricsHandler(service)
 
 	r := chi.NewRouter()
 	r.Use(logmiddleware.LoggerMiddleware(logger))
 	r.Use(gzipmiddleware.GzipMiddleware)
+	r.Use(hashmiddleware.HashCheckMiddleware(config.Key))
 
 	r.Get("/", handler.HandleIndex)
 	r.Post("/update/{type}/{name}/{value}", handler.HandleUpdate)

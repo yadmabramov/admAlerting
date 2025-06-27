@@ -68,19 +68,22 @@ func main() {
 		ServerURL:      "localhost:8080",
 		PollInterval:   2 * time.Second,
 		ReportInterval: 10 * time.Second,
+		Key:            "",
 	}
 
 	config := agent.Config{
 		ServerURL:      getEnv("ADDRESS", defaultConfig.ServerURL),
 		PollInterval:   getEnvDuration("POLL_INTERVAL", defaultConfig.PollInterval),
 		ReportInterval: getEnvDuration("REPORT_INTERVAL", defaultConfig.ReportInterval),
+		Key:            getEnv("KEY", defaultConfig.Key),
 	}
 
-	var flagAddress, flagPoll, flagReport string
+	var flagAddress, flagPoll, flagReport, flagKey string
 	pflag.StringVarP(&flagAddress, "address", "a", "", "HTTP server endpoint address")
 	pflag.StringVarP(&flagPoll, "poll-interval", "p", "", "Poll interval in seconds")
 	pflag.StringVarP(&flagReport, "report-interval", "r", "", "Report interval in seconds")
 	pflag.BoolP("help", "h", false, "Show help message")
+	pflag.StringVarP(&flagKey, "key", "k", "", "Secret key for hash calculation (env: KEY)")
 
 	pflag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags]\n\nFlags:\n", os.Args[0])
@@ -120,6 +123,9 @@ func main() {
 			log.Fatalf("Invalid report interval: %v", err)
 		}
 	}
+	if flagKey != "" && os.Getenv("KEY") == "" {
+		config.Key = flagKey
+	}
 
 	normalizedURL, err := validateAndNormalizeServerURL(config.ServerURL)
 	if err != nil {
@@ -128,12 +134,5 @@ func main() {
 	config.ServerURL = normalizedURL
 
 	agent := agent.NewAgent(config)
-	log.Printf("Starting agent with config (priority: ENV > FLAGS > DEFAULTS):\n"+
-		"  Server URL:      %s\n"+
-		"  Poll Interval:   %v (%.0f seconds)\n"+
-		"  Report Interval: %v (%.0f seconds)",
-		config.ServerURL,
-		config.PollInterval, config.PollInterval.Seconds(),
-		config.ReportInterval, config.ReportInterval.Seconds())
 	agent.Run()
 }

@@ -58,6 +58,7 @@ func main() {
 		StoragePath:   "metrics-db.json",
 		Restore:       true,
 		DatabaseDSN:   "",
+		Key:           "",
 	}
 
 	config := server.Config{
@@ -66,9 +67,10 @@ func main() {
 		StoragePath:   getEnv("FILE_STORAGE_PATH", defaultConfig.StoragePath),
 		Restore:       getEnvBool("RESTORE", defaultConfig.Restore),
 		DatabaseDSN:   getEnv("DATABASE_DSN", defaultConfig.DatabaseDSN),
+		Key:           getEnv("KEY", defaultConfig.Key),
 	}
 
-	var flagAddr, flagStoreInt, flagStoragePath, flagDatabaseDSN string
+	var flagAddr, flagStoreInt, flagStoragePath, flagDatabaseDSN, flagKey string
 	var flagRestore bool
 	pflag.StringVarP(&flagAddr, "address", "a", "", "HTTP server endpoint address (env: ADDRESS)")
 	pflag.StringVarP(&flagStoreInt, "store-interval", "i", "", "Interval to save metrics to disk in seconds (env: STORE_INTERVAL)")
@@ -78,6 +80,7 @@ func main() {
 	pflag.BoolP("help", "h", false, "Show help message")
 	pflag.BoolP("version", "v", false, "Show version information")
 	pflag.CommandLine.SortFlags = false
+	pflag.StringVarP(&flagKey, "key", "k", "", "Secret key for hash verification (env: KEY)")
 
 	pflag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\nOptions:\n", os.Args[0])
@@ -112,6 +115,9 @@ func main() {
 	}
 	if flagDatabaseDSN != "" && os.Getenv("DATABASE_DSN") == "" {
 		config.DatabaseDSN = flagDatabaseDSN
+	}
+	if flagKey != "" && os.Getenv("KEY") == "" {
+		config.Key = flagKey
 	}
 	normalizedURL, err := validateAndNormalizeServerURL(config.Addr)
 	if err != nil {

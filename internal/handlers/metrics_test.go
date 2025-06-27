@@ -52,7 +52,7 @@ func (m *MockStorage) Close() error {
 
 func TestMetricsHandler(t *testing.T) {
 	mockStorage := &MockStorage{}
-	service := service.NewMetricsService(mockStorage)
+	service := service.NewMetricsService(mockStorage, "")
 	handler := NewMetricsHandler(service)
 
 	t.Run("Update gauge", func(t *testing.T) {
@@ -112,7 +112,7 @@ func TestMetricsHandler(t *testing.T) {
 
 func TestMetricsHandlerJSON(t *testing.T) {
 	mockStorage := &MockStorage{}
-	service := service.NewMetricsService(mockStorage)
+	service := service.NewMetricsService(mockStorage, "")
 	handler := NewMetricsHandler(service)
 
 	t.Run("Update gauge via JSON", func(t *testing.T) {
