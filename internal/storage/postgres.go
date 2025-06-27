@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -70,9 +69,9 @@ func createTables(db *sql.DB) error {
 	return nil
 }
 
-func (s *PostgresStorage) UpdateGauge(name string, value float64) error {
+func (s *PostgresStorage) UpdateGauge(ctx context.Context, name string, value float64) error {
 	return utils.Retry(dbMaxRetries, dbInitialDelay, func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 
 		_, err := s.DB.ExecContext(ctx, `
@@ -86,9 +85,9 @@ func (s *PostgresStorage) UpdateGauge(name string, value float64) error {
 	})
 }
 
-func (s *PostgresStorage) UpdateCounter(name string, value int64) error {
+func (s *PostgresStorage) UpdateCounter(ctx context.Context, name string, value int64) error {
 	return utils.Retry(dbMaxRetries, dbInitialDelay, func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 
 		_, err := s.DB.ExecContext(ctx, `
@@ -102,52 +101,58 @@ func (s *PostgresStorage) UpdateCounter(name string, value int64) error {
 	})
 }
 
-func (s *PostgresStorage) GetAllMetrics() (map[string]float64, map[string]int64) {
+func (s *PostgresStorage) GetAllMetrics(ctx context.Context) (map[string]float64, map[string]int64, error) {
 	gauges := make(map[string]float64)
 	counters := make(map[string]int64)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	rows, err := s.DB.QueryContext(ctx, "SELECT name, value FROM gauges")
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var name string
-			var value float64
-			if err := rows.Scan(&name, &value); err == nil {
-				gauges[name] = value
-			}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to query gauges: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+		var value float64
+		if err := rows.Scan(&name, &value); err != nil {
+			return nil, nil, fmt.Errorf("failed to scan gauge row: %w", err)
 		}
-		if err := rows.Err(); err != nil {
-			log.Printf("Error reading gauges: %v", err)
-		}
+		gauges[name] = value
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error reading gauges: %w", err)
 	}
 
 	rows, err = s.DB.QueryContext(ctx, "SELECT name, value FROM counters")
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var name string
-			var value int64
-			if err := rows.Scan(&name, &value); err == nil {
-				counters[name] = value
-			}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to query counters: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+		var value int64
+		if err := rows.Scan(&name, &value); err != nil {
+			return nil, nil, fmt.Errorf("failed to scan counter row: %w", err)
 		}
-		if err := rows.Err(); err != nil {
-			log.Printf("Error reading counters: %v", err)
-		}
+		counters[name] = value
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error reading counters: %w", err)
 	}
 
-	return gauges, counters
+	return gauges, counters, nil
 }
 
-func (s *PostgresStorage) GetGauge(name string) (float64, bool) {
+func (s *PostgresStorage) GetGauge(ctx context.Context, name string) (float64, bool) {
 	var value float64
 	var found bool
 
 	_ = utils.Retry(dbMaxRetries, dbInitialDelay, func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 
 		err := s.DB.QueryRowContext(ctx, "SELECT value FROM gauges WHERE name = $1", name).Scan(&value)
@@ -164,12 +169,12 @@ func (s *PostgresStorage) GetGauge(name string) (float64, bool) {
 	return value, found
 }
 
-func (s *PostgresStorage) GetCounter(name string) (int64, bool) {
+func (s *PostgresStorage) GetCounter(ctx context.Context, name string) (int64, bool) {
 	var value int64
 	var found bool
 
 	_ = utils.Retry(dbMaxRetries, dbInitialDelay, func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 
 		err := s.DB.QueryRowContext(ctx, "SELECT value FROM counters WHERE name = $1", name).Scan(&value)

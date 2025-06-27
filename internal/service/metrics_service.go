@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -15,30 +16,30 @@ func NewMetricsService(storage storage.Repository) *MetricsService {
 	return &MetricsService{storage: storage}
 }
 
-func (s *MetricsService) UpdateGauge(name string, value string) error {
+func (s *MetricsService) UpdateGauge(ctx context.Context, name string, value string) error {
 	floatValue, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		return fmt.Errorf("invalid gauge value: %w", err)
 	}
-	return s.storage.UpdateGauge(name, floatValue)
+	return s.storage.UpdateGauge(ctx, name, floatValue)
 }
 
-func (s *MetricsService) UpdateCounter(name string, value string) error {
+func (s *MetricsService) UpdateCounter(ctx context.Context, name string, value string) error {
 	intValue, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid counter value: %w", err)
 	}
-	return s.storage.UpdateCounter(name, intValue)
+	return s.storage.UpdateCounter(ctx, name, intValue)
 }
 
-func (s *MetricsService) GetGauge(name string) (float64, bool) {
-	return s.storage.GetGauge(name)
+func (s *MetricsService) GetGauge(ctx context.Context, name string) (float64, bool) {
+	return s.storage.GetGauge(ctx, name)
 }
 
-func (s *MetricsService) GetCounter(name string) (int64, bool) {
-	return s.storage.GetCounter(name)
+func (s *MetricsService) GetCounter(ctx context.Context, name string) (int64, bool) {
+	return s.storage.GetCounter(ctx, name)
 }
 
-func (s *MetricsService) GetAllMetrics() (map[string]float64, map[string]int64) {
-	return s.storage.GetAllMetrics()
+func (s *MetricsService) GetAllMetrics(ctx context.Context) (map[string]float64, map[string]int64, error) {
+	return s.storage.GetAllMetrics(ctx)
 }

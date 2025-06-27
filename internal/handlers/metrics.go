@@ -24,6 +24,7 @@ func (h *MetricsHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
 	mType := chi.URLParam(r, "type")
 	mName := chi.URLParam(r, "name")
 	mValue := chi.URLParam(r, "value")
@@ -31,9 +32,9 @@ func (h *MetricsHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch mType {
 	case "gauge":
-		err = h.service.UpdateGauge(mName, mValue)
+		err = h.service.UpdateGauge(ctx, mName, mValue)
 	case "counter":
-		err = h.service.UpdateCounter(mName, mValue)
+		err = h.service.UpdateCounter(ctx, mName, mValue)
 	default:
 		http.Error(w, "Invalid type", http.StatusBadRequest)
 		return
@@ -48,17 +49,18 @@ func (h *MetricsHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MetricsHandler) HandleGetMetric(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	mType := chi.URLParam(r, "type")
 	mName := chi.URLParam(r, "name")
 
 	switch mType {
 	case "gauge":
-		if value, ok := h.service.GetGauge(mName); ok {
+		if value, ok := h.service.GetGauge(ctx, mName); ok {
 			w.Write([]byte(strconv.FormatFloat(value, 'f', -1, 64)))
 			return
 		}
 	case "counter":
-		if value, ok := h.service.GetCounter(mName); ok {
+		if value, ok := h.service.GetCounter(ctx, mName); ok {
 			w.Write([]byte(strconv.FormatInt(value, 10)))
 			return
 		}
@@ -71,7 +73,12 @@ func (h *MetricsHandler) HandleGetMetric(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *MetricsHandler) HandleGetAllMetricsJSON(w http.ResponseWriter, r *http.Request) {
-	gauges, counters := h.service.GetAllMetrics()
+	ctx := r.Context()
+	gauges, counters, err := h.service.GetAllMetrics(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	type MetricsResponse struct {
 		Gauges   map[string]float64 `json:"gauges"`
@@ -93,6 +100,7 @@ func (h *MetricsHandler) HandleUpdateJSON(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	ctx := r.Context()
 	var metric models.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&metric); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -108,12 +116,12 @@ func (h *MetricsHandler) HandleUpdateJSON(w http.ResponseWriter, r *http.Request
 			http.Error(w, "Value is required for gauge", http.StatusBadRequest)
 			return
 		}
-		err = h.service.UpdateGauge(metric.ID, strconv.FormatFloat(*metric.Value, 'f', -1, 64))
+		err = h.service.UpdateGauge(ctx, metric.ID, strconv.FormatFloat(*metric.Value, 'f', -1, 64))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		val, ok := h.service.GetGauge(metric.ID)
+		val, ok := h.service.GetGauge(ctx, metric.ID)
 		if !ok {
 			http.Error(w, "Failed to retrieve updated gauge value", http.StatusInternalServerError)
 			return
@@ -128,12 +136,12 @@ func (h *MetricsHandler) HandleUpdateJSON(w http.ResponseWriter, r *http.Request
 			http.Error(w, "Delta is required for counter", http.StatusBadRequest)
 			return
 		}
-		err = h.service.UpdateCounter(metric.ID, strconv.FormatInt(*metric.Delta, 10))
+		err = h.service.UpdateCounter(ctx, metric.ID, strconv.FormatInt(*metric.Delta, 10))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		val, ok := h.service.GetCounter(metric.ID)
+		val, ok := h.service.GetCounter(ctx, metric.ID)
 		if !ok {
 			http.Error(w, "Failed to retrieve updated counter value", http.StatusInternalServerError)
 			return
@@ -158,6 +166,7 @@ func (h *MetricsHandler) HandleGetMetricJSON(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	ctx := r.Context()
 	var metric models.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&metric); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -168,7 +177,7 @@ func (h *MetricsHandler) HandleGetMetricJSON(w http.ResponseWriter, r *http.Requ
 
 	switch metric.MType {
 	case "gauge":
-		if value, ok := h.service.GetGauge(metric.ID); ok {
+		if value, ok := h.service.GetGauge(ctx, metric.ID); ok {
 			response = models.Metrics{
 				ID:    metric.ID,
 				MType: metric.MType,
@@ -179,7 +188,7 @@ func (h *MetricsHandler) HandleGetMetricJSON(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	case "counter":
-		if value, ok := h.service.GetCounter(metric.ID); ok {
+		if value, ok := h.service.GetCounter(ctx, metric.ID); ok {
 			response = models.Metrics{
 				ID:    metric.ID,
 				MType: metric.MType,
@@ -204,6 +213,7 @@ func (h *MetricsHandler) HandleBatchUpdates(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	ctx := r.Context()
 	var metrics []models.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -221,12 +231,12 @@ func (h *MetricsHandler) HandleBatchUpdates(w http.ResponseWriter, r *http.Reque
 				http.Error(w, "Value is required for gauge", http.StatusBadRequest)
 				return
 			}
-			err = h.service.UpdateGauge(metric.ID, strconv.FormatFloat(*metric.Value, 'f', -1, 64))
+			err = h.service.UpdateGauge(ctx, metric.ID, strconv.FormatFloat(*metric.Value, 'f', -1, 64))
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			val, ok := h.service.GetGauge(metric.ID)
+			val, ok := h.service.GetGauge(ctx, metric.ID)
 			if !ok {
 				http.Error(w, "Failed to retrieve updated gauge value", http.StatusInternalServerError)
 				return
@@ -241,12 +251,12 @@ func (h *MetricsHandler) HandleBatchUpdates(w http.ResponseWriter, r *http.Reque
 				http.Error(w, "Delta is required for counter", http.StatusBadRequest)
 				return
 			}
-			err = h.service.UpdateCounter(metric.ID, strconv.FormatInt(*metric.Delta, 10))
+			err = h.service.UpdateCounter(ctx, metric.ID, strconv.FormatInt(*metric.Delta, 10))
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			val, ok := h.service.GetCounter(metric.ID)
+			val, ok := h.service.GetCounter(ctx, metric.ID)
 			if !ok {
 				http.Error(w, "Failed to retrieve updated counter value", http.StatusInternalServerError)
 				return

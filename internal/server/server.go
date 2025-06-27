@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -56,19 +57,16 @@ func NewServer(config Config) *Server {
 		db = postgresStorage.GetDB()
 		logger.Info("Using PostgreSQL storage")
 	} else {
-		if config.StoragePath != "" {
-			memStorage := storage.NewMemoryStorage()
-			repo = memStorage
-			if config.Restore {
-				if err := loadMetricsFromFile(config.StoragePath, repo); err != nil {
-					logger.Error("Failed to load metrics from file", zap.Error(err))
-				}
+		// Инициализируем memory storage
+		repo = storage.NewMemoryStorage()
+
+		// Если указан путь к файлу, загружаем метрики
+		if config.StoragePath != "" && config.Restore {
+			if err := loadMetricsFromFile(config.StoragePath, repo); err != nil {
+				logger.Error("Failed to load metrics from file", zap.Error(err))
 			}
-			logger.Info("Using file storage", zap.String("path", config.StoragePath))
-		} else {
-			repo = storage.NewMemoryStorage()
-			logger.Info("Using in-memory storage")
 		}
+		logger.Info("Using in-memory storage", zap.String("path", config.StoragePath))
 	}
 
 	service := service.NewMetricsService(repo)
@@ -152,7 +150,13 @@ func (s *Server) startSaver() {
 }
 
 func (s *Server) saveMetrics() error {
-	gauges, counters := s.storage.GetAllMetrics()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	gauges, counters, err := s.storage.GetAllMetrics(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get metrics: %w", err)
+	}
 
 	data := struct {
 		Gauges   map[string]float64 `json:"gauges"`
@@ -162,7 +166,6 @@ func (s *Server) saveMetrics() error {
 		Counters: counters,
 	}
 
-	// Создаем директорию, если она не существует
 	if err := os.MkdirAll(filepath.Dir(s.config.StoragePath), 0755); err != nil {
 		return err
 	}
@@ -197,14 +200,17 @@ func loadMetricsFromFile(path string, storage storage.Repository) error {
 		return err
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	for name, value := range data.Gauges {
-		if err := storage.UpdateGauge(name, value); err != nil {
+		if err := storage.UpdateGauge(ctx, name, value); err != nil {
 			return err
 		}
 	}
 
 	for name, value := range data.Counters {
-		if err := storage.UpdateCounter(name, value); err != nil {
+		if err := storage.UpdateCounter(ctx, name, value); err != nil {
 			return err
 		}
 	}
