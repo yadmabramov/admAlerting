@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/yadmabramov/admAlerting/internal/models"
 	"github.com/yadmabramov/admAlerting/internal/service"
+	"github.com/yadmabramov/admAlerting/internal/utils"
 )
 
 type MetricsHandler struct {
@@ -156,6 +157,12 @@ func (h *MetricsHandler) HandleUpdateJSON(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if h.service.GetKey() != "" {
+		data, _ := json.Marshal(response)
+		hash := utils.CalculateHash(data, h.service.GetKey())
+		w.Header().Set("HashSHA256", hash)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -204,6 +211,13 @@ func (h *MetricsHandler) HandleGetMetricJSON(w http.ResponseWriter, r *http.Requ
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+
+	if h.service.GetKey() != "" {
+		data, _ := json.Marshal(response)
+		hash := utils.CalculateHash(data, h.service.GetKey())
+		w.Header().Set("HashSHA256", hash)
+	}
+
 	json.NewEncoder(w).Encode(response)
 }
 
@@ -274,5 +288,12 @@ func (h *MetricsHandler) HandleBatchUpdates(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+
+	if h.service.GetKey() != "" {
+		data, _ := json.Marshal(response)
+		hash := utils.CalculateHash(data, h.service.GetKey())
+		w.Header().Set("HashSHA256", hash)
+	}
+
 	json.NewEncoder(w).Encode(response)
 }

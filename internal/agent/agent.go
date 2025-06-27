@@ -31,12 +31,14 @@ type Agent struct {
 	metrics        map[string]string
 	pollCount      int64
 	mu             sync.Mutex
+	config         Config
 }
 
 type Config struct {
 	ServerURL      string
 	PollInterval   time.Duration
 	ReportInterval time.Duration
+	Key            string
 }
 
 const (
@@ -78,22 +80,36 @@ func NewAgent(config Config) *Agent {
 		pollInterval:   config.PollInterval,
 		reportInterval: config.ReportInterval,
 		metrics:        make(map[string]string),
+		config:         config,
 	}
 }
 
 func (a *Agent) Run() {
+
+	log.Printf("Starting agent with config (priority: ENV > FLAGS > DEFAULTS):\n"+
+		"  Server URL:      %s\n"+
+		"  Poll Interval:   %v (%.0f seconds)\n"+
+		"  Report Interval: %v (%.0f seconds)\n"+
+		"  Using key:       %t",
+		a.serverURL,
+		a.pollInterval, a.pollInterval.Seconds(),
+		a.reportInterval, a.reportInterval.Seconds(),
+		a.config.Key != "")
+
 	for {
-		// Собираем метрики
-		a.collectMetrics()
+		for {
+			// Собираем метрики
+			a.collectMetrics()
 
-		// Ждем интервал опроса
-		time.Sleep(a.pollInterval)
+			// Ждем интервал опроса
+			time.Sleep(a.pollInterval)
 
-		// Проверяем, не пришло ли время отправки
-		if time.Now().UnixNano()%a.reportInterval.Nanoseconds() < a.pollInterval.Nanoseconds() {
-			if err := a.sendBatchMetrics(); err != nil {
-				log.Printf("Failed to send batch metrics: %v, falling back to single metric mode", err)
-				a.sendMetrics()
+			// Проверяем, не пришло ли время отправки
+			if time.Now().UnixNano()%a.reportInterval.Nanoseconds() < a.pollInterval.Nanoseconds() {
+				if err := a.sendBatchMetrics(); err != nil {
+					log.Printf("Failed to send batch metrics: %v, falling back to single metric mode", err)
+					a.sendMetrics()
+				}
 			}
 		}
 	}
@@ -199,6 +215,11 @@ func (a *Agent) sendBatchMetrics() error {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept-Encoding", "gzip")
 
+		if a.config.Key != "" {
+			hash := utils.CalculateHash(jsonData, a.config.Key)
+			req.Header.Set("HashSHA256", hash)
+		}
+
 		resp, err := a.client.Do(req)
 		if err != nil {
 			return err
@@ -271,6 +292,10 @@ func (a *Agent) sendMetricJSON(mType, mName, mValue string) error {
 		req.Header.Set("Content-Encoding", "gzip")
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept-Encoding", "gzip")
+		if a.config.Key != "" {
+			hash := utils.CalculateHash(jsonData, a.config.Key)
+			req.Header.Set("HashSHA256", hash)
+		}
 
 		resp, err := a.client.Do(req)
 		if err != nil {
