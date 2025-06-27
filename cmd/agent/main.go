@@ -5,8 +5,10 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -24,6 +26,15 @@ func parseSeconds(s string) (time.Duration, error) {
 func getEnv(key, defaultValue string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
+	}
+	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if value, exists := os.LookupEnv(key); exists {
+		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
+		}
 	}
 	return defaultValue
 }
@@ -69,6 +80,7 @@ func main() {
 		PollInterval:   2 * time.Second,
 		ReportInterval: 10 * time.Second,
 		Key:            "",
+		RateLimit:      1,
 	}
 
 	config := agent.Config{
@@ -76,14 +88,23 @@ func main() {
 		PollInterval:   getEnvDuration("POLL_INTERVAL", defaultConfig.PollInterval),
 		ReportInterval: getEnvDuration("REPORT_INTERVAL", defaultConfig.ReportInterval),
 		Key:            getEnv("KEY", defaultConfig.Key),
+		RateLimit:      getEnvInt("RATE_LIMIT", defaultConfig.RateLimit),
 	}
 
-	var flagAddress, flagPoll, flagReport, flagKey string
+	var (
+		flagAddress   string
+		flagPoll      string
+		flagReport    string
+		flagKey       string
+		flagRateLimit int
+	)
+
 	pflag.StringVarP(&flagAddress, "address", "a", "", "HTTP server endpoint address")
 	pflag.StringVarP(&flagPoll, "poll-interval", "p", "", "Poll interval in seconds")
 	pflag.StringVarP(&flagReport, "report-interval", "r", "", "Report interval in seconds")
 	pflag.BoolP("help", "h", false, "Show help message")
 	pflag.StringVarP(&flagKey, "key", "k", "", "Secret key for hash calculation (env: KEY)")
+	pflag.IntVarP(&flagRateLimit, "limit", "l", 0, "Rate limit for outgoing requests (env: RATE_LIMIT)")
 
 	pflag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags]\n\nFlags:\n", os.Args[0])
@@ -92,6 +113,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  ADDRESS          HTTP server endpoint address\n")
 		fmt.Fprintf(os.Stderr, "  POLL_INTERVAL    Poll interval in seconds\n")
 		fmt.Fprintf(os.Stderr, "  REPORT_INTERVAL  Report interval in seconds\n")
+		fmt.Fprintf(os.Stderr, "  RATE_LIMIT       Rate limit for outgoing requests\n")
 		fmt.Fprintf(os.Stderr, "\nPriority: ENV > FLAGS > DEFAULTS\n")
 	}
 
@@ -126,6 +148,9 @@ func main() {
 	if flagKey != "" && os.Getenv("KEY") == "" {
 		config.Key = flagKey
 	}
+	if flagRateLimit > 0 && os.Getenv("RATE_LIMIT") == "" {
+		config.RateLimit = flagRateLimit
+	}
 
 	normalizedURL, err := validateAndNormalizeServerURL(config.ServerURL)
 	if err != nil {
@@ -134,5 +159,14 @@ func main() {
 	config.ServerURL = normalizedURL
 
 	agent := agent.NewAgent(config)
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-stop
+		agent.Shutdown()
+	}()
+
 	agent.Run()
 }
