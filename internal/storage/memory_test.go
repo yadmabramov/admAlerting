@@ -1,29 +1,35 @@
 package storage
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMemoryStorage(t *testing.T) {
+	ctx := context.Background()
+	s := NewMemoryStorage()
+
 	t.Run("Gauge operations", func(t *testing.T) {
-		s := NewMemoryStorage()
+		err := s.UpdateGauge(ctx, "test_gauge", 123.45)
+		assert.NoError(t, err)
+		err = s.UpdateGauge(ctx, "test_gauge", 678.90)
+		assert.NoError(t, err)
 
-		s.UpdateGauge("test_gauge", 123.45)
-		s.UpdateGauge("test_gauge", 678.90)
-
-		gauges, _ := s.GetAllMetrics()
+		gauges, _, err := s.GetAllMetrics(ctx)
+		assert.NoError(t, err)
 		assert.Equal(t, 678.90, gauges["test_gauge"])
 	})
 
 	t.Run("Counter operations", func(t *testing.T) {
-		s := NewMemoryStorage()
+		err := s.UpdateCounter(ctx, "test_counter", 10)
+		assert.NoError(t, err)
+		err = s.UpdateCounter(ctx, "test_counter", 5)
+		assert.NoError(t, err)
 
-		s.UpdateCounter("test_counter", 10)
-		s.UpdateCounter("test_counter", 5)
-
-		_, counters := s.GetAllMetrics()
+		_, counters, err := s.GetAllMetrics(ctx)
+		assert.NoError(t, err)
 		assert.Equal(t, int64(15), counters["test_counter"])
 	})
 }

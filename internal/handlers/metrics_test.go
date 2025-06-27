@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,26 +20,34 @@ type MockStorage struct {
 	lastCounter int64
 }
 
-func (m *MockStorage) UpdateGauge(name string, value float64) error {
+func (m *MockStorage) UpdateGauge(ctx context.Context, name string, value float64) error {
 	m.lastGauge = value
 	return nil
 }
 
-func (m *MockStorage) UpdateCounter(name string, value int64) error {
+func (m *MockStorage) UpdateCounter(ctx context.Context, name string, value int64) error {
 	m.lastCounter = value
 	return nil
 }
 
-func (m *MockStorage) GetAllMetrics() (map[string]float64, map[string]int64) {
-	return nil, nil
+func (m *MockStorage) GetAllMetrics(ctx context.Context) (map[string]float64, map[string]int64, error) {
+	return nil, nil, nil
 }
 
-func (m *MockStorage) GetGauge(name string) (float64, bool) {
+func (m *MockStorage) GetGauge(ctx context.Context, name string) (float64, bool) {
 	return m.lastGauge, true
 }
 
-func (m *MockStorage) GetCounter(name string) (int64, bool) {
+func (m *MockStorage) GetCounter(ctx context.Context, name string) (int64, bool) {
 	return m.lastCounter, true
+}
+
+func (m *MockStorage) GetDB() *sql.DB {
+	return nil
+}
+
+func (m *MockStorage) Close() error {
+	return nil
 }
 
 func TestMetricsHandler(t *testing.T) {

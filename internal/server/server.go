@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 	"github.com/yadmabramov/admAlerting/internal/server/logmiddleware"
 	"github.com/yadmabramov/admAlerting/internal/service"
 	"github.com/yadmabramov/admAlerting/internal/storage"
+	"github.com/yadmabramov/admAlerting/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -23,6 +26,7 @@ type Config struct {
 	StoreInterval time.Duration
 	StoragePath   string
 	Restore       bool
+	DatabaseDSN   string
 }
 
 type Server struct {
@@ -32,6 +36,7 @@ type Server struct {
 	logger  *zap.Logger
 	stop    chan struct{}
 	wg      sync.WaitGroup
+	db      *sql.DB
 }
 
 func NewServer(config Config) *Server {
@@ -40,14 +45,31 @@ func NewServer(config Config) *Server {
 		panic(err)
 	}
 
-	storage := storage.NewMemoryStorage()
-	if config.Restore {
-		if err := loadMetricsFromFile(config.StoragePath, storage); err != nil {
-			logger.Error("Failed to load metrics from file", zap.Error(err))
+	var repo storage.Repository
+	var db *sql.DB
+
+	if config.DatabaseDSN != "" {
+		postgresStorage, err := storage.NewPostgresStorage(config.DatabaseDSN)
+		if err != nil {
+			logger.Fatal("Failed to initialize PostgreSQL storage", zap.Error(err))
 		}
+		repo = postgresStorage
+		db = postgresStorage.GetDB()
+		logger.Info("Using PostgreSQL storage")
+	} else {
+		// Инициализируем memory storage
+		repo = storage.NewMemoryStorage()
+
+		// Если указан путь к файлу, загружаем метрики
+		if config.StoragePath != "" && config.Restore {
+			if err := loadMetricsFromFile(config.StoragePath, repo); err != nil {
+				logger.Error("Failed to load metrics from file", zap.Error(err))
+			}
+		}
+		logger.Info("Using in-memory storage", zap.String("path", config.StoragePath))
 	}
 
-	service := service.NewMetricsService(storage)
+	service := service.NewMetricsService(repo)
 	handler := handlers.NewMetricsHandler(service)
 
 	r := chi.NewRouter()
@@ -62,7 +84,27 @@ func NewServer(config Config) *Server {
 		handler.HandleGetAllMetricsJSON(w, r)
 	})
 	r.Post("/update/", handler.HandleUpdateJSON)
+	r.Post("/updates/", handler.HandleBatchUpdates)
 	r.Post("/value/", handler.HandleGetMetricJSON)
+	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+		if db == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		err := utils.Retry(3, time.Second, func() error {
+			return db.PingContext(ctx)
+		})
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 
 	srv := &http.Server{
 		Addr:    config.Addr,
@@ -72,12 +114,13 @@ func NewServer(config Config) *Server {
 	server := &Server{
 		Server:  srv,
 		config:  config,
-		storage: storage,
+		storage: repo,
 		logger:  logger,
 		stop:    make(chan struct{}),
+		db:      db,
 	}
 
-	if config.StoreInterval > 0 {
+	if config.StoragePath != "" && config.DatabaseDSN == "" && config.StoreInterval > 0 {
 		server.wg.Add(1)
 		go server.startSaver()
 	}
@@ -107,7 +150,13 @@ func (s *Server) startSaver() {
 }
 
 func (s *Server) saveMetrics() error {
-	gauges, counters := s.storage.GetAllMetrics()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	gauges, counters, err := s.storage.GetAllMetrics(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get metrics: %w", err)
+	}
 
 	data := struct {
 		Gauges   map[string]float64 `json:"gauges"`
@@ -117,7 +166,6 @@ func (s *Server) saveMetrics() error {
 		Counters: counters,
 	}
 
-	// Создаем директорию, если она не существует
 	if err := os.MkdirAll(filepath.Dir(s.config.StoragePath), 0755); err != nil {
 		return err
 	}
@@ -152,14 +200,17 @@ func loadMetricsFromFile(path string, storage storage.Repository) error {
 		return err
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	for name, value := range data.Gauges {
-		if err := storage.UpdateGauge(name, value); err != nil {
+		if err := storage.UpdateGauge(ctx, name, value); err != nil {
 			return err
 		}
 	}
 
 	for name, value := range data.Counters {
-		if err := storage.UpdateCounter(name, value); err != nil {
+		if err := storage.UpdateCounter(ctx, name, value); err != nil {
 			return err
 		}
 	}
@@ -188,6 +239,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.config.StoreInterval > 0 {
 		if err := s.saveMetrics(); err != nil {
 			s.logger.Error("Failed to save metrics on shutdown", zap.Error(err))
+		}
+	}
+
+	if s.db != nil {
+		if err := s.db.Close(); err != nil {
+			s.logger.Error("Failed to close database connection", zap.Error(err))
 		}
 	}
 

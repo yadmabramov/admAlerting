@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"context"
+	"database/sql"
 	"sync"
 )
 
@@ -17,21 +19,25 @@ func NewMemoryStorage() *MemoryStorage {
 	}
 }
 
-func (s *MemoryStorage) UpdateGauge(name string, value float64) error {
+func (s *MemoryStorage) GetDB() *sql.DB {
+	return nil
+}
+
+func (s *MemoryStorage) UpdateGauge(ctx context.Context, name string, value float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gauges[name] = value
 	return nil
 }
 
-func (s *MemoryStorage) UpdateCounter(name string, value int64) error {
+func (s *MemoryStorage) UpdateCounter(ctx context.Context, name string, value int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.counters[name] += value
 	return nil
 }
 
-func (s *MemoryStorage) GetAllMetrics() (map[string]float64, map[string]int64) {
+func (s *MemoryStorage) GetAllMetrics(ctx context.Context) (map[string]float64, map[string]int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -46,19 +52,23 @@ func (s *MemoryStorage) GetAllMetrics() (map[string]float64, map[string]int64) {
 		countersCopy[k] = v
 	}
 
-	return gaugesCopy, countersCopy
+	return gaugesCopy, countersCopy, nil
 }
 
-func (s *MemoryStorage) GetGauge(name string) (float64, bool) {
+func (s *MemoryStorage) GetGauge(ctx context.Context, name string) (float64, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	val, ok := s.gauges[name]
 	return val, ok
 }
 
-func (s *MemoryStorage) GetCounter(name string) (int64, bool) {
+func (s *MemoryStorage) GetCounter(ctx context.Context, name string) (int64, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	val, ok := s.counters[name]
 	return val, ok
+}
+
+func (s *MemoryStorage) Close() error {
+	return nil
 }
